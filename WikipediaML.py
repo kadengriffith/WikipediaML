@@ -24,6 +24,12 @@ DATE = None
 DUMP_URL = None
 STATUS_URL = None
 STATUS_FILE = None
+SPECIFIED_DOWNLOAD_DIRECTORY = None
+
+VERSION_OVERRIDE = tfds.core.Version("0.0.0",
+                                     experiments={
+                                         tfds.core.Experiment.S3: False
+                                     })
 
 
 def _parse_and_clean_wikicode(raw_content):
@@ -99,15 +105,17 @@ class _CustomWikipediaConfig(tfds.core.BuilderConfig):
 
 class CustomWikipedia(tfds.core.BeamBasedBuilder):
     BUILDER_CONFIG = _CustomWikipediaConfig(
-        version=tfds.core.Version("0.0.0",
-                                  experiments={
-                                      tfds.core.Experiment.S3: False
-                                  }),
+        version=VERSION_OVERRIDE,
         language=LANGUAGE,
         date=DATE
     )
 
-    VERSION = tfds.core.Version("0.0.0")
+    VERSION = VERSION_OVERRIDE
+
+    def __init__(self):
+        # Force an override of the default download location
+        super(CustomWikipedia, self).__init__(
+            data_dir=SPECIFIED_DOWNLOAD_DIRECTORY)
 
     def _info(self):
         return tfds.core.DatasetInfo(
@@ -251,6 +259,16 @@ class WikipediaML():
 
         self._download_path = os.path.join(self._abs_dir, data_dir)
 
+        self._extract_path = os.path.join(self._download_path, "extracted")
+        if not os.path.exists(self._extract_path):
+            # Create relative extraction directory
+            os.makedirs(self._extract_path)
+
+        self._manual_path = os.path.join(self._download_path, "manual")
+        if not os.path.exists(self._manual_path):
+            # Create relative manual directory
+            os.mkdir(self._manual_path)
+
         self._checksum_initial_file_path = os.path.join(self._download_path,
                                                         "_dump_manifest.txt")
 
@@ -271,11 +289,13 @@ class WikipediaML():
         global DATE
         global DUMP_URL
         global STATUS_URL
+        global SPECIFIED_DOWNLOAD_DIRECTORY
 
         LANGUAGE = self._language
         DATE = self._timestamp
         DUMP_URL = self._dump_url
         STATUS_URL = self._status_url
+        SPECIFIED_DOWNLOAD_DIRECTORY = self._download_path
 
         if os.path.exists(self._output_file_path) and not download:
             return self._cached_dataset()
@@ -284,7 +304,8 @@ class WikipediaML():
 
             self._pipeline_config = beam.options.pipeline_options.PipelineOptions()
             self._download_config = tfds.download.DownloadConfig(beam_options=self._pipeline_config,
-                                                                 extract_dir=self._download_path,
+                                                                 extract_dir=self._extract_path,
+                                                                 manual_dir=self._manual_path,
                                                                  download_mode=download_mode,
                                                                  register_checksums=True)
 
