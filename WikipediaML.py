@@ -4,9 +4,8 @@ import tensorflow_datasets as tfds
 import xml.etree.cElementTree as etree
 import apache_beam as beam
 import mwparserfromhell
-import urllib
 import urllib3
-import pickle
+import shutil
 import math
 import json
 import re
@@ -17,6 +16,11 @@ import time
 # TF code produces warnings due to lazy implementation of urllib3 requests
 # Can't fix this from the outside, so we'll ignore their mistakes
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+http = urllib3.PoolManager()
+
+# Disables my print statements if you prefer minimal printing
+ENABLE_CODE_FEEDBACK = False
 
 # These constants are specified by using the WikipediaML class
 LANGUAGE = None
@@ -30,6 +34,11 @@ VERSION_OVERRIDE = tfds.core.Version("0.0.0",
                                      experiments={
                                          tfds.core.Experiment.S3: False
                                      })
+
+
+def feedback(message):
+    if ENABLE_CODE_FEEDBACK:
+        print(message)
 
 
 def _parse_and_clean_wikicode(raw_content):
@@ -238,9 +247,14 @@ class WikipediaML():
                  data_dir=None,
                  split=tfds.Split.TRAIN,
                  as_supervised=False,
-                 batch_size=None,
-                 shuffle_files=None):
+                 batch_size=1,
+                 shuffle_files=False,
+                 code_messages=ENABLE_CODE_FEEDBACK):
         self._abs_dir = os.path.abspath(os.path.dirname(__file__))
+
+        # Use preference of user
+        global ENABLE_CODE_FEEDBACK
+        ENABLE_CODE_FEEDBACK = code_messages
 
         self._language = language
         self._timestamp = date
@@ -275,14 +289,7 @@ class WikipediaML():
         self._checksum_file_path = os.path.join(self._download_path,
                                                 "custom_wikipedia.txt")
 
-        self._output_filename = "{0}/{1}_{2}_wikipedia.tfds.p".format(self._download_path,
-                                                                      self._timestamp,
-                                                                      self._language)
-
-        self._output_file_path = os.path.join(self._abs_dir,
-                                              self._output_filename)
-
-    def load(self, download=False, download_mode=tfds.GenerateMode.REUSE_CACHE_IF_EXISTS):
+    def load(self, download=False, download_mode=tfds.GenerateMode.REUSE_DATASET_IF_EXISTS):
         # Show TF classes what dump is relevant
         # This code is disgusting...
         global LANGUAGE
@@ -297,77 +304,55 @@ class WikipediaML():
         STATUS_URL = self._status_url
         SPECIFIED_DOWNLOAD_DIRECTORY = self._download_path
 
-        if os.path.exists(self._output_file_path) and not download:
-            return self._cached_dataset()
-        else:
-            self._builder = CustomWikipedia()
+        self._builder = CustomWikipedia()
 
-            self._pipeline_config = beam.options.pipeline_options.PipelineOptions()
-            self._download_config = tfds.download.DownloadConfig(beam_options=self._pipeline_config,
-                                                                 extract_dir=self._extract_path,
-                                                                 manual_dir=self._manual_path,
-                                                                 download_mode=download_mode,
-                                                                 register_checksums=True)
+        self._pipeline_config = beam.options.pipeline_options.PipelineOptions()
+        self._download_config = tfds.download.DownloadConfig(beam_options=self._pipeline_config,
+                                                             extract_dir=self._extract_path,
+                                                             manual_dir=self._manual_path,
+                                                             download_mode=download_mode,
+                                                             register_checksums=True)
 
-            tfds.download.add_checksums_dir(self._download_path)
+        tfds.download.add_checksums_dir(self._download_path)
 
+        if not os.path.exists(self._checksum_file_path):
             self._checksum_make()
 
             while not os.path.exists(self._checksum_file_path):
                 # Wait on the checksum file generator...
                 pass
 
-            print("Downloading {0} Wikipedia dump from {1}.\n".format(self._language,
-                                                                      self._timestamp))
-            print("This could take a while...\n")
+        feedback("Loading {0} Wikipedia dump from {1}.\n".format(self._language,
+                                                                 self._timestamp))
+        feedback("This could take a while...\n")
 
-            download_start = self._g_time()
+        download_start = self._g_time()
 
-            self._builder.download_and_prepare(download_dir=self._download_path,
-                                               download_config=self._download_config)
+        self._builder.download_and_prepare(download_dir=self._download_path,
+                                           download_config=self._download_config)
 
-            print("...done. Data prep took ~{0}mins.\n".format(
-                self._g_minutes_elapsed(download_start)))
+        feedback("...done. Data prep took ~{0}mins.\n".format(
+            self._g_minutes_elapsed(download_start)))
 
-            print("Making TF Dataset...\n")
+        feedback("Making TF Dataset...\n")
 
-            dataset_start = self._g_time()
+        dataset_start = self._g_time()
 
-            self._tensorflow_dataset = self._builder.as_dataset(split=self._split,
-                                                                batch_size=self._batch_size,
-                                                                shuffle_files=self._shuffle_files,
-                                                                as_supervised=self._as_supervised)
+        self._tensorflow_dataset = self._builder.as_dataset(split=self._split,
+                                                            batch_size=self._batch_size,
+                                                            shuffle_files=self._shuffle_files,
+                                                            as_supervised=self._as_supervised)
 
-            print("...done. Dataset creation took ~{0}mins.\n".format(
-                self._g_minutes_elapsed(dataset_start)))
+        feedback("...done. Dataset creation took ~{0}mins.\n".format(
+            self._g_minutes_elapsed(dataset_start)))
 
-            print("\nSaving dataset...")
-
-            save_start = self._g_time()
-
-            self._save()
-
-            print("...saved to {0}! Saving took ~{1}mins.\n".format(self._output_filename,
-                                                                    self._g_minutes_elapsed(save_start)))
-
-            return self._tensorflow_dataset
+        return self._tensorflow_dataset
 
     def _g_time(self):
         return time.time()
 
     def _g_minutes_elapsed(self, start):
         return int((self._g_time() - start) / 60)
-
-    def _cached_dataset(self):
-        with open(self._output_file_path, 'rb') as fh:
-            cached_dataset = pickle.load(fh)
-
-        return cached_dataset
-
-    def _save(self):
-        with open(self._output_file_path, "wb") as fh:
-            # Save a binary
-            pickle.dump(self._tensorflow_dataset, fh)
 
     def _checksum_make(self):
         # This creates a checksum format file for the download to proceed
@@ -385,7 +370,8 @@ class WikipediaML():
         STATUS_FILE = os.path.join(self._download_path, "status.json")
 
         # Download the dumpstatus.json file from wikimedia
-        urllib.urlretrieve(self._status_url, STATUS_FILE)
+        with http.request('GET', self._status_url, preload_content=False) as r, open(STATUS_FILE, 'wb') as out_file:
+            shutil.copyfileobj(r, out_file)
 
         with open(STATUS_FILE) as fh:
             dump_info = json.load(fh)
