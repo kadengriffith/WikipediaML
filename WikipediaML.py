@@ -30,10 +30,10 @@ STATUS_URL = None
 STATUS_FILE = None
 SPECIFIED_DOWNLOAD_DIRECTORY = None
 
-VERSION_OVERRIDE = tfds.core.Version("0.0.0",
-                                     experiments={
-                                         tfds.core.Experiment.S3: False
-                                     })
+# experiments={
+#                                        tfds.core.Experiment.S3: False
+#                                    }
+VERSION_OVERRIDE = tfds.core.Version("0.0.0")
 
 
 def feedback(message):
@@ -373,8 +373,12 @@ class WikipediaML():
         with http.request('GET', self._status_url, preload_content=False) as r, open(STATUS_FILE, 'wb') as out_file:
             shutil.copyfileobj(r, out_file)
 
-        with open(STATUS_FILE) as fh:
-            dump_info = json.load(fh)
+        try:
+            with open(STATUS_FILE) as fh:
+                dump_info = json.load(fh)
+        except ValueError:
+            print("Could not source the status JSON file.")
+            exit(404)
 
         # Target the articles
         multistream_dump_info = dump_info["jobs"]["articlesmultistreamdump"]
@@ -396,7 +400,7 @@ class WikipediaML():
 if __name__ == "__main__":
     # Example use case
     dataset = WikipediaML(language="en",
-                          date=20190601,
+                          date=20190801,
                           data_dir="data/en_wikipedia").load()
 
     # Do dataset things...
