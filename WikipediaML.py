@@ -31,8 +31,8 @@ STATUS_FILE = None
 SPECIFIED_DOWNLOAD_DIRECTORY = None
 
 # experiments={
-#                                        tfds.core.Experiment.S3: False
-#                                    }
+#   tfds.core.Experiment.S3: False
+# }
 VERSION_OVERRIDE = tfds.core.Version("0.0.0")
 
 
@@ -134,7 +134,7 @@ class CustomWikipedia(tfds.core.BeamBasedBuilder):
                 "text": tfds.features.Text(),
             }),
             supervised_keys=None,
-            urls=["https://dumps.wikimedia.org"],
+            homepage="https://dumps.wikimedia.org",
             citation="""\
                 @ONLINE {wikidump,
                     author = "Wikimedia Foundation",
@@ -321,20 +321,23 @@ class WikipediaML():
             while not os.path.exists(self._checksum_file_path):
                 # Wait on the checksum file generator...
                 pass
+        else:
+            global STATUS_FILE
+            STATUS_FILE = os.path.join(self._download_path, "status.json")
 
-        feedback("Loading {0} Wikipedia dump from {1}.\n".format(self._language,
-                                                                 self._timestamp))
-        feedback("This could take a while...\n")
+        feedback("Loading {0} Wikipedia dump from {1}.".format(self._language,
+                                                               self._timestamp))
+        feedback("This could take a while...")
 
         download_start = self._g_time()
 
         self._builder.download_and_prepare(download_dir=self._download_path,
                                            download_config=self._download_config)
 
-        feedback("...done. Data prep took ~{0}mins.\n".format(
+        feedback("...done. Data prep took ~{0}mins.".format(
             self._g_minutes_elapsed(download_start)))
 
-        feedback("Making TF Dataset...\n")
+        feedback("Making TF Dataset...")
 
         dataset_start = self._g_time()
 
@@ -343,7 +346,7 @@ class WikipediaML():
                                                             shuffle_files=self._shuffle_files,
                                                             as_supervised=self._as_supervised)
 
-        feedback("...done. Dataset creation took ~{0}mins.\n".format(
+        feedback("...done. Dataset creation took ~{0}mins.".format(
             self._g_minutes_elapsed(dataset_start)))
 
         return self._tensorflow_dataset
@@ -389,9 +392,9 @@ class WikipediaML():
                     continue
 
                 # Write the checksum line
-                fh.write("{0} {1} {2}\n".format(self._base_url + info["url"],
-                                                info["size"],
-                                                info["sha1"]))
+                fh.write("{0} {1} {2}".format(self._base_url + info["url"],
+                                              info["size"],
+                                              info["sha1"]))
 
         # Move the completed checksum
         os.rename(self._checksum_initial_file_path, self._checksum_file_path)

@@ -1,4 +1,5 @@
-apache-beam
+pycodestyle
+apache-beam==2.16.0
 mwparserfromhell
 urllib3
 tfds-nightly
