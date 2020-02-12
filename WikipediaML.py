@@ -14,7 +14,6 @@ import six
 import time
 
 # TF code produces warnings due to lazy implementation of urllib3 requests
-# Can't fix this from the outside, so we'll ignore their mistakes
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 http = urllib3.PoolManager()
@@ -134,7 +133,7 @@ class CustomWikipedia(tfds.core.BeamBasedBuilder):
                 "text": tfds.features.Text(),
             }),
             supervised_keys=None,
-            homepage="https://dumps.wikimedia.org",
+            urls=["https://dumps.wikimedia.org"],
             citation="""\
                 @ONLINE {wikidump,
                     author = "Wikimedia Foundation",

@@ -16,7 +16,7 @@ Yes, this is hacky. Without significant testing, I was able to run the Wikipedia
 
 The downloads are very large, but once completed this will save the TF dataset in the download directory you specify under a folder named **custom_wikipedia**. Once you download, you will re-use the existing dataset by default. You can change the version if you wish to re-download a newer version using the same directory.
 
-To find specific scrapes first visit: [Wikimedia](https://dumps.wikimedia.org/backup-index.html), then find the language code you want (e.g., "en" for English, or "fr" for French), and finally find the date of the dump you wish to download. Keep in mind that these dumps are rolling, so if a few months pass and you wish to re-use this class as a downloader you will need to find a date that exists on the Wikimedia server. For example at the time of me writing this, my most current date is: 20190801.
+To find specific scrapes first visit: [Wikimedia](https://dumps.wikimedia.org/backup-index.html), then find the language code you want (e.g., "en" for English, or "fr" for French), and finally find the date of the dump you wish to download. Keep in mind that these dumps are rolling, so if a few months pass and you wish to re-use this class as a downloader you will need to find a date that exists on the Wikimedia server. For example at the time of me writing this, my most current date is: 20200120.
 
 Just drop the WikipediaML.py file into your project and use as if you are using the tfds.load(). Not all of the tfds.load() API is present so check out the API section below.
 
@@ -24,7 +24,9 @@ If the binary exists, you will not re-download the dump unless you change the fo
 
 ##### NOTE: Make sure your download directory is changed if you want to download more than one version, the files may be overwritten unintentionally since this generator acts as a universal gateway.
 
-#### API
+##### ISSUES: Please check the version of tensorflow-datasets matches 1.2.0 if you are not installing from the provided requirements. You can load a binary of the data once downloaded and parsed if you require >1.2.0.
+
+## API
 
 **WikipediaML**
 
@@ -54,6 +56,6 @@ If the binary exists, you will not re-download the dump unless you change the fo
 ```
 # Get the English dataset
 tfds = WikipediaML(language="en",
-                   date=20190801,
+                   date=20200120,
                    data_dir="data/en_wikipedia").load()
 ```

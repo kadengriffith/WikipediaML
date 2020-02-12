@@ -1,5 +1,5 @@
 pycodestyle
-apache-beam==2.16.0
+apache-beam
 mwparserfromhell
 urllib3
-tfds-nightly
+tensorflow-datasets==1.2.0
