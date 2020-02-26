@@ -429,7 +429,7 @@ class WikipediaML():
 if __name__ == "__main__":
     # Example use case
     dataset = WikipediaML(language="en",
-                          date=20200201,
+                          date=20200220,
                           data_dir="data/en_wikipedia",
                           verbose=True).load()
 
