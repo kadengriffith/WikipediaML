@@ -1,42 +1,58 @@
-import tensorflow as tf
-from tensorflow_datasets.core import api_utils
+from __future__ import absolute_import, division, print_function
+
+from tensorflow_datasets.core.api_utils import disallow_positional_args
 import tensorflow_datasets as tfds
-import xml.etree.cElementTree as etree
 import apache_beam as beam
 import mwparserfromhell
+from lxml import etree
+from shutil import copyfileobj
+from math import ceil
+from json import load as load_json
+from re import compile, IGNORECASE, UNICODE
+from six import text_type
+from time import time as now
 import urllib3
-import shutil
-import math
-import json
-import re
 import os
-import six
-import time
 
 # TF code produces warnings due to lazy implementation of urllib3 requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-http = urllib3.PoolManager()
-
 # Disables my print statements if you prefer minimal printing
-ENABLE_CODE_FEEDBACK = False
+_ENABLE_CODE_FEEDBACK = False
 
 # These constants are specified by using the WikipediaML class
-LANGUAGE = None
-DATE = None
-DUMP_URL = None
-STATUS_URL = None
-STATUS_FILE = None
-SPECIFIED_DOWNLOAD_DIRECTORY = None
+_LANGUAGE = None
+_DATE = None
+_DUMP_URL = None
+_STATUS_URL = None
+_STATUS_FILE = None
+_SPECIFIED_DOWNLOAD_DIRECTORY = None
+_VERSION_OVERRIDE = tfds.core.Version("0.0.0")
 
-# experiments={
-#   tfds.core.Experiment.S3: False
-# }
-VERSION_OVERRIDE = tfds.core.Version("0.0.0")
+_CITATION = """\
+                @ONLINE {wikidump,
+                    author = "Wikimedia Foundation",
+                    title  = "Wikimedia Downloads",
+                    url    = "https://dumps.wikimedia.org"
+                }"""
+
+_LICENSE = {"license": (
+    "This work is licensed under the Creative Commons Attribution-ShareAlike "
+    "3.0 Unported License. To view a copy of this license, visit "
+    "http://creativecommons.org/licenses/by-sa/3.0/ or send a letter to "
+    "Creative Commons, PO Box 1866, Mountain View, CA 94042, USA.")}
+
+_HOMEPAGE = "https://dumps.wikimedia.org"
+
+_FEATURES = tfds.features.FeaturesDict({
+    "title": tfds.features.Text(),
+    "text": tfds.features.Text(),
+})
 
 
 def feedback(message):
-    if ENABLE_CODE_FEEDBACK:
+    # A helper to the print function to disable unecessary prints
+    if _ENABLE_CODE_FEEDBACK:
         print(message)
 
 
@@ -45,14 +61,14 @@ def _parse_and_clean_wikicode(raw_content):
     wikicode = mwparserfromhell.parse(raw_content)
 
     # Filters for references, tables, and file/image links.
-    re_rm_wikilink = re.compile("^(?:File|Image|Media):",
-                                flags=re.IGNORECASE | re.UNICODE)
+    re_rm_wikilink = compile("^(?:File|Image|Media):",
+                             flags=IGNORECASE | UNICODE)
 
     def rm_wikilink(obj):
-        return bool(re_rm_wikilink.match(six.text_type(obj.title)))
+        return bool(re_rm_wikilink.match(text_type(obj.title)))
 
     def rm_tag(obj):
-        return six.text_type(obj.tag) in {
+        return text_type(obj.tag) in {
             "ref",
             "table"
         }
@@ -98,7 +114,7 @@ def _parse_and_clean_wikicode(raw_content):
 
 
 class _CustomWikipediaConfig(tfds.core.BuilderConfig):
-    @api_utils.disallow_positional_args
+    @disallow_positional_args
     def __init__(self, language=None, date=None, **kwargs):
         super(_CustomWikipediaConfig, self).__init__(
             name="{0}.{1}".format(date,
@@ -112,47 +128,47 @@ class _CustomWikipediaConfig(tfds.core.BuilderConfig):
 
 
 class CustomWikipedia(tfds.core.BeamBasedBuilder):
+    # Globals for the builder
     BUILDER_CONFIG = _CustomWikipediaConfig(
-        version=VERSION_OVERRIDE,
-        language=LANGUAGE,
-        date=DATE
+        version=_VERSION_OVERRIDE,
+        language=_LANGUAGE,
+        date=_DATE
     )
-
-    VERSION = VERSION_OVERRIDE
+    VERSION = _VERSION_OVERRIDE
 
     def __init__(self):
         # Force an override of the default download location
         super(CustomWikipedia, self).__init__(
-            data_dir=SPECIFIED_DOWNLOAD_DIRECTORY)
+            data_dir=_SPECIFIED_DOWNLOAD_DIRECTORY
+        )
 
     def _info(self):
-        return tfds.core.DatasetInfo(
-            builder=self,
-            features=tfds.features.FeaturesDict({
-                "title": tfds.features.Text(),
-                "text": tfds.features.Text(),
-            }),
-            supervised_keys=None,
-            urls=["https://dumps.wikimedia.org"],
-            citation="""\
-                @ONLINE {wikidump,
-                    author = "Wikimedia Foundation",
-                    title  = "Wikimedia Downloads",
-                    url    = "https://dumps.wikimedia.org"
-                }""",
-            redistribution_info={"license": (
-                "This work is licensed under the Creative Commons Attribution-ShareAlike "
-                "3.0 Unported License. To view a copy of this license, visit "
-                "http://creativecommons.org/licenses/by-sa/3.0/ or send a letter to "
-                "Creative Commons, PO Box 1866, Mountain View, CA 94042, USA.")})
+        # Construct dataset info
+        try:
+            return tfds.core.DatasetInfo(
+                builder=self,
+                features=_FEATURES,
+                supervised_keys=None,
+                homepage=_HOMEPAGE,
+                citation=_CITATION,
+                redistribution_info=_LICENSE)
+        except:
+            # Older versions of tfds
+            return tfds.core.DatasetInfo(
+                builder=self,
+                features=_FEATURES,
+                supervised_keys=None,
+                urls=[_HOMEPAGE],
+                citation=_CITATION,
+                redistribution_info=_LICENSE)
 
     def _split_generators(self, dl_manager):
         xml_urls = []
         total_bytes = 0
 
         # Re-use the generated status.json
-        with open(STATUS_FILE) as fh:
-            dump_info = json.load(fh)
+        with open(_STATUS_FILE) as fh:
+            dump_info = load_json(fh)
 
         multistream_dump_info = dump_info["jobs"]["articlesmultistreamdump"]
 
@@ -163,14 +179,14 @@ class CustomWikipedia(tfds.core.BeamBasedBuilder):
                 continue
 
             total_bytes += info["size"]
-            xml_urls.append(DUMP_URL + fname)
+            xml_urls.append(_DUMP_URL + fname)
 
         downloaded_files = dl_manager.download_and_extract({
             "xml": xml_urls
         })
 
         # Max 128MB
-        max_bytes = int(math.ceil(total_bytes / (128 * 2**20)))
+        max_bytes = int(ceil(total_bytes / (128 * 2**20)))
 
         return [
             tfds.core.SplitGenerator(
@@ -178,44 +194,50 @@ class CustomWikipedia(tfds.core.BeamBasedBuilder):
                 num_shards=max_bytes,
                 gen_kwargs={
                     "filepaths": downloaded_files["xml"],
-                    "language": LANGUAGE
+                    "language": _LANGUAGE
                 })
         ]
 
     def _build_pcollection(self, pipeline, filepaths, language):
         def _extract_content(filepath):
-            with tf.io.gfile.GFile(filepath) as f:
-                for _, elem in etree.iterparse(f, events=("end",)):
-                    if not elem.tag.endswith("page"):
-                        continue
+            # Extracts article content from a single WikiMedia XML file.
+            context = etree.iterparse(filepath,
+                                      events=("end",),
+                                      encoding="utf-8")
+            context = iter(context)
+            # To clear root, to free-up more memory than just `elem.clear()`.
+            _, root = next(context)
+            for _, elem in context:
+                if not elem.tag.endswith("page"):
+                    continue
+                namespace = elem.tag[:-4]
+                title = elem.find("./{0}title".format(namespace)).text
+                ns = elem.find("./{0}ns".format(namespace)).text
+                id_ = elem.find("./{0}id".format(namespace)).text
 
-                    namespace = elem.tag[:-4]
-                    title = elem.find("./{0}title".format(namespace)).text
-                    ns = elem.find("./{0}ns".format(namespace)).text
+                # Filter pages that are not in the "main" namespace.
+                if ns != "0":
+                    root.clear()
+                    continue
 
-                    # Filter pages that are not in the "main" namespace.
-                    if ns != "0":
-                        continue
+                raw_content = elem.find(
+                    "./{0}revision/{0}text".format(namespace)
+                ).text
+                root.clear()
 
-                    raw_content = elem.find(
-                        "./{0}revision/{0}text".format(namespace)
-                    ).text
-
-                    elem.clear()
-
-                    # Filter redirects.
-                    if raw_content is None or raw_content.lower().startswith("#redirect"):
-                        beam.metrics.Metrics.counter(language,
-                                                     "filtered-redirects").inc()
-                        continue
-
+                # Filter redirects.
+                if raw_content is None or raw_content.lower().startswith("#redirect"):
                     beam.metrics.Metrics.counter(language,
-                                                 "extracted-examples").inc()
+                                                 "filtered-redirects").inc()
+                    continue
 
-                    yield (title, raw_content)
+                beam.metrics.Metrics.counter(language,
+                                             "extracted-examples").inc()
+
+                yield (id_, title, raw_content)
 
         def _clean_content(inputs):
-            title, raw_content = inputs
+            id_, title, raw_content = inputs
 
             try:
                 text = _parse_and_clean_wikicode(raw_content)
@@ -223,23 +245,31 @@ class CustomWikipedia(tfds.core.BeamBasedBuilder):
                 beam.metrics.Metrics.counter(language, "parser-error").inc()
                 return
 
+            if not text:
+                beam.metrics.Metrics.counter(language,
+                                             "empty-clean-examples").inc()
+                return
+
             beam.metrics.Metrics.counter(language, "cleaned-examples").inc()
 
-            yield {
+            yield id_, {
                 "title": title,
                 "text": text
             }
+
+        feedback("Creating pipeline: extract => shuffle => parse/clean...")
 
         return (
             pipeline
             | beam.Create(filepaths)
             | beam.FlatMap(_extract_content)
+            | beam.transforms.Reshuffle()
             | beam.FlatMap(_clean_content)
         )
 
 
 class WikipediaML():
-    @api_utils.disallow_positional_args
+    @disallow_positional_args
     def __init__(self,
                  language=None,
                  date=None,
@@ -248,12 +278,12 @@ class WikipediaML():
                  as_supervised=False,
                  batch_size=1,
                  shuffle_files=False,
-                 code_messages=ENABLE_CODE_FEEDBACK):
+                 verbose=_ENABLE_CODE_FEEDBACK):
         self._abs_dir = os.path.abspath(os.path.dirname(__file__))
 
-        # Use preference of user
-        global ENABLE_CODE_FEEDBACK
-        ENABLE_CODE_FEEDBACK = code_messages
+        # Use print preference of user
+        global _ENABLE_CODE_FEEDBACK
+        _ENABLE_CODE_FEEDBACK = verbose
 
         self._language = language
         self._timestamp = date
@@ -289,19 +319,18 @@ class WikipediaML():
                                                 "custom_wikipedia.txt")
 
     def load(self, download=False, download_mode=tfds.GenerateMode.REUSE_DATASET_IF_EXISTS):
-        # Show TF classes what dump is relevant
-        # This code is disgusting...
-        global LANGUAGE
-        global DATE
-        global DUMP_URL
-        global STATUS_URL
-        global SPECIFIED_DOWNLOAD_DIRECTORY
+        # Create and return the Wikipedia TFDataset
+        global _LANGUAGE
+        global _DATE
+        global _DUMP_URL
+        global _STATUS_URL
+        global _SPECIFIED_DOWNLOAD_DIRECTORY
 
-        LANGUAGE = self._language
-        DATE = self._timestamp
-        DUMP_URL = self._dump_url
-        STATUS_URL = self._status_url
-        SPECIFIED_DOWNLOAD_DIRECTORY = self._download_path
+        _LANGUAGE = self._language
+        _DATE = self._timestamp
+        _DUMP_URL = self._dump_url
+        _STATUS_URL = self._status_url
+        _SPECIFIED_DOWNLOAD_DIRECTORY = self._download_path
 
         self._builder = CustomWikipedia()
 
@@ -321,8 +350,8 @@ class WikipediaML():
                 # Wait on the checksum file generator...
                 pass
         else:
-            global STATUS_FILE
-            STATUS_FILE = os.path.join(self._download_path, "status.json")
+            global _STATUS_FILE
+            _STATUS_FILE = os.path.join(self._download_path, "status.json")
 
         feedback("Loading {0} Wikipedia dump from {1}.".format(self._language,
                                                                self._timestamp))
@@ -351,33 +380,31 @@ class WikipediaML():
         return self._tensorflow_dataset
 
     def _g_time(self):
-        return time.time()
+        return now()
 
     def _g_minutes_elapsed(self, start):
         return int((self._g_time() - start) / 60)
 
     def _checksum_make(self):
         # This creates a checksum format file for the download to proceed
-        # The complete file is moved to the main directory which then
-        #  will trigger the download
-
         if os.path.exists(self._checksum_file_path):
             os.remove(self._checksum_file_path)
 
         if not os.path.exists(self._download_path):
             os.makedirs(self._download_path)
 
-        global STATUS_FILE
+        global _STATUS_FILE
 
-        STATUS_FILE = os.path.join(self._download_path, "status.json")
+        _STATUS_FILE = os.path.join(self._download_path, "status.json")
 
         # Download the dumpstatus.json file from wikimedia
-        with http.request('GET', self._status_url, preload_content=False) as r, open(STATUS_FILE, 'wb') as out_file:
-            shutil.copyfileobj(r, out_file)
+        with urllib3.PoolManager().request('GET', self._status_url, preload_content=False) as r, \
+                open(_STATUS_FILE, 'wb') as out_file:
+            copyfileobj(r, out_file)
 
         try:
-            with open(STATUS_FILE) as fh:
-                dump_info = json.load(fh)
+            with open(_STATUS_FILE) as fh:
+                dump_info = load_json(fh)
         except ValueError:
             print("Could not source the status JSON file.")
             exit(404)
@@ -402,8 +429,9 @@ class WikipediaML():
 if __name__ == "__main__":
     # Example use case
     dataset = WikipediaML(language="en",
-                          date=20190801,
-                          data_dir="data/en_wikipedia").load()
+                          date=20200201,
+                          data_dir="data/en_wikipedia",
+                          verbose=True).load()
 
     # Do dataset things...
     print(dataset)

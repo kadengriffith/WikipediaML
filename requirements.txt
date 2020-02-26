@@ -1,5 +1,6 @@
+tensorflow-datasets
+lxml
+urllib3
 pycodestyle
 apache-beam
 mwparserfromhell
-urllib3
-tensorflow-datasets==1.2.0
